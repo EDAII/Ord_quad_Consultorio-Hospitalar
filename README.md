@@ -69,7 +69,7 @@ Para interromper a aplicação: pressione Ctrl+C no terminal.
 - Se receber erros de versão, crie um ambiente virtual com `python -m venv .venv` e ative-o antes de instalar as dependências.
 ## Capturas de tela
  
-  ![Home](capturas/Home.PNG)  
+  ![Home](capturas/Home.png)  
 
 ## Conclusões
 
