@@ -23,6 +23,12 @@ class Paciente:
     chegada: int
     idade: int
     triagem: int  # 0=Vermelho (mais crítico) ... 4=Azul
+    # Prioridade legal (Lei de atendimento prioritário)
+    deficiencia: bool = False
+    gestante: bool = False
+    lactante: bool = False
+    crianca_colo: bool = False
+    obesidade: bool = False
 
 TRIAGEM_LABELS = {
     0: "Vermelho (crítico)",
@@ -39,8 +45,28 @@ TRIAGEM_CORES = {
     4: "#757575",
 }
 
-def chave_padrao(p: Paciente) -> Tuple[int, int, int]:
-    return (p.triagem, p.chegada, -p.idade)
+def chave_padrao(p: Paciente) -> Tuple[int, int, int, int]:
+    """
+    Chave de ordenação padrão (usada pelo Merge Sort).
+
+    Ordem (importante):
+      1) triagem (ASC) - prioridades clínicas (0=Vermelho, 1=Amarelo) sempre vêm primeiro
+      2) prioridade legal (ASC) - em triagens não urgentes, grupos prioritários vêm antes (0=prioritário, 1=não)
+      3) chegada (ASC) - quem chegou primeiro
+      4) idade (DESC) - desempate por idade (pessoas mais velhas primeiro)
+
+    Observação: a prioridade legal não sobrescreve casos de emergência/urgência porque triagem tem precedência.
+    """
+    # determina se o paciente pertence a grupo prioritário pela legislação
+    possui_prioridade = (
+        p.deficiencia or p.gestante or p.lactante or p.crianca_colo or p.obesidade or (p.idade >= 60)
+    )
+    # prioridade_flag: 0 para prioritário (vem antes), 1 para não prioritário
+    prioridade_flag = 0 if possui_prioridade else 1
+
+    # Em qualquer caso, triagem continua sendo o primeiro critério. A prioridade legal só afeta
+    # a ordenação entre pacientes com a mesma triagem (em especial, triagens não urgentes).
+    return (p.triagem, prioridade_flag, p.chegada, -p.idade)
 
 # ============================
 # Merge Sort estável com métricas
@@ -95,12 +121,32 @@ def merge_sort_estavel(arr: List[Paciente], key=chave_padrao):
 def pacientes_para_df(pacientes: List[Paciente]) -> pd.DataFrame:
     df = pd.DataFrame([asdict(p) for p in pacientes])
     if df.empty:
-        return pd.DataFrame(columns=["posição", "nome", "triagem", "chegada", "idade"])
+        return pd.DataFrame(columns=["posição", "nome", "prioridade", "triagem_label", "chegada", "idade"])
     df = df.assign(
         triagem_label=df["triagem"].map(TRIAGEM_LABELS),
         triagem_cor=df["triagem"].map(TRIAGEM_CORES),
     )
-    df = df[["nome", "triagem", "triagem_label", "triagem_cor", "chegada", "idade"]]
+    # construir rótulo de prioridade legal (concatena grupos quando presentes)
+    def prioridade_label_row(row):
+        labels = []
+        if row.get("deficiencia"):
+            labels.append("Deficiência")
+        if row.get("gestante"):
+            labels.append("Gestante")
+        if row.get("lactante"):
+            labels.append("Lactante")
+        if row.get("crianca_colo"):
+            labels.append("Criança de colo")
+        if row.get("obesidade"):
+            labels.append("Obesidade")
+        # idoso é calculado a partir da idade (>=60)
+        if row.get("idade") is not None and int(row.get("idade")) >= 60:
+            labels.append("Idoso (60+)")
+        return ", ".join(labels)
+
+    df = df.assign(prioridade=df.apply(prioridade_label_row, axis=1))
+    # organizar colunas: manter triagem numérica (para regras de estilo), mostrar triagem_label e prioridade
+    df = df[["nome", "prioridade", "triagem", "triagem_label", "triagem_cor", "chegada", "idade"]]
     df.insert(0, "posição", range(1, len(df) + 1))
     return df
 
@@ -110,6 +156,7 @@ def tabela_formatada(id_table: str):
         columns=[
             {"name": "Posição", "id": "posição"},
             {"name": "Nome", "id": "nome"},
+            {"name": "Prioridade", "id": "prioridade"},
             {"name": "Triagem", "id": "triagem_label"},
             {"name": "Chegada", "id": "chegada"},
             {"name": "Idade", "id": "idade"},
@@ -196,6 +243,25 @@ app.layout = html.Div(
             ],
         ),
 
+        # ---- Prioridades legais (checkboxes) ----
+        html.Div(
+            style={"display": "flex", "gap": "8px", "marginBottom": "14px", "flexWrap": "wrap"},
+            children=[
+                dcc.Checklist(
+                    id="in-prioridades",
+                    options=[
+                        {"label": "Deficiência", "value": "deficiencia"},
+                        {"label": "Gestante", "value": "gestante"},
+                        {"label": "Lactante", "value": "lactante"},
+                        {"label": "Criança de colo", "value": "crianca_colo"},
+                        {"label": "Obesidade", "value": "obesidade"},
+                    ],
+                    value=[],
+                    labelStyle={"marginRight": "12px"},
+                )
+            ],
+        ),
+
         # ---- Ações ----
         html.Div(
             style={"display": "flex", "gap": "8px", "marginBottom": "8px", "flexWrap": "wrap"},
@@ -248,20 +314,34 @@ app.layout = html.Div(
     State("in-nome", "value"),
     State("in-idade", "value"),
     State("in-triagem", "value"),
+    State("in-prioridades", "value"),
     State("store-pacientes", "data"),
     prevent_initial_call=True,
 )
-def add_paciente(n, nome, idade, triagem, store):
+def add_paciente(n, nome, idade, triagem, prioridades, store):
     if not n or not nome or idade is None:
         return no_update, no_update, no_update
     lista = [Paciente(**p) for p in store["lista"]]
     seq = int(store.get("seq_chegada", 0)) + 1
+    flags = set(prioridades or [])
+    idade_int = int(idade)
+    # regra: não permitir gestante e lactante se idade >= 60 (idoso)
+    if idade_int >= 60 and "gestante" in flags:
+        flags.discard("gestante")
+    if idade_int >= 60 and "lactante" in flags:
+        flags.discard("lactante")
+
     novo = Paciente(
         id=int(datetime.utcnow().timestamp() * 1000000) % 10**9,
         nome=nome.strip(),
         chegada=seq,
-        idade=int(idade),
+        idade=idade_int,
         triagem=int(triagem),
+        deficiencia="deficiencia" in flags,
+        gestante="gestante" in flags,
+        lactante="lactante" in flags,
+        crianca_colo="crianca_colo" in flags,
+        obesidade="obesidade" in flags,
     )
     lista.append(novo)
     return {"lista": [asdict(p) for p in lista], "seq_chegada": seq}, "", None
@@ -275,13 +355,13 @@ def exemplo(n):
     if not n:
         return no_update
     exemplo_dados = [
-        Paciente(1, "Ana", 1, 70, 1),
-        Paciente(2, "Beto", 2, 30, 1),
-        Paciente(3, "Caio", 3, 50, 0),
-        Paciente(4, "Duda", 4, 65, 1),
-        Paciente(5, "Eva", 5, 22, 2),
-        Paciente(6, "Fábio", 6, 80, 1),
-        Paciente(7, "Gabi", 7, 18, 2),
+        Paciente(1, "Ana", 1, 70, 1, deficiencia=False, gestante=False, lactante=False, crianca_colo=False, obesidade=False),
+        Paciente(2, "Beto", 2, 30, 1, deficiencia=False, gestante=False, lactante=False, crianca_colo=False, obesidade=True),
+        Paciente(3, "Caio", 3, 50, 0, deficiencia=False, gestante=False, lactante=False, crianca_colo=False, obesidade=False),
+        Paciente(4, "Duda", 4, 65, 1, deficiencia=False, gestante=False, lactante=False, crianca_colo=False, obesidade=False),
+        Paciente(5, "Eva", 5, 22, 2, deficiencia=False, gestante=False, lactante=True, crianca_colo=False, obesidade=False),
+        Paciente(6, "Fábio", 6, 80, 1, deficiencia=False, gestante=False, lactante=False, crianca_colo=False, obesidade=False),
+        Paciente(7, "Gabi", 7, 18, 2, deficiencia=False, gestante=False, lactante=False, crianca_colo=True, obesidade=False),
     ]
     seq = max(p.chegada for p in exemplo_dados)
     return {"lista": [asdict(p) for p in exemplo_dados], "seq_chegada": seq}
@@ -331,6 +411,42 @@ def render_depois(store_ord):
     pacientes = [Paciente(**p) for p in store_ord["lista"]]
     df = pacientes_para_df(pacientes)
     return df.to_dict("records"), colorir_triagem(df)
+
+
+@app.callback(
+    Output("in-prioridades", "options"),
+    Output("in-prioridades", "value"),
+    Input("in-idade", "value"),
+    State("in-prioridades", "value"),
+)
+def ajustar_prioridades_por_idade(idade, current_vals):
+    """Desabilita e desmarca 'Gestante' quando idade >= 60."""
+    base = [
+        {"label": "Deficiência", "value": "deficiencia"},
+        {"label": "Gestante", "value": "gestante"},
+        {"label": "Lactante", "value": "lactante"},
+        {"label": "Criança de colo", "value": "crianca_colo"},
+        {"label": "Obesidade", "value": "obesidade"},
+    ]
+    if idade is None:
+        return base, current_vals or []
+    try:
+        idade_int = int(idade)
+    except Exception:
+        return base, current_vals or []
+
+    if idade_int >= 60:
+        # desabilita a opção gestante e remove de current_vals se presente
+        opts = []
+        for o in base:
+            if o["value"] in ("gestante", "lactante"):
+                opts.append({**o, "disabled": True})
+            else:
+                opts.append(o)
+        vals = [v for v in (current_vals or []) if v not in ("gestante", "lactante")]
+        return opts, vals
+    # idade < 60 -> garantir opção habilitada
+    return base, current_vals or []
 
 # ============================
 # Main
