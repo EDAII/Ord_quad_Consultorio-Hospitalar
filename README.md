@@ -75,6 +75,14 @@ Para interromper a aplicação: pressione Ctrl+C no terminal.
 
 O OrdenaClinic demonstra como aplicar regras de prioridade clínica (triagem) e legislação de atendimento prioritário para organizar filas de atendimento de forma justa e estável. Utilizamos um algoritmo estável (Merge Sort) para preservar a ordem de chegada entre pacientes de mesma prioridade e adicionamos camadas de prioridade legal (idosos, gestantes, lactantes, pessoas com deficiência, crianças de colo e obesidade). A aplicação serve como protótipo pedagógico e base para futuras integrações em ambientes reais de saúde.
 
+## Gravação 
+<br>
+
+[![Assista ao vídeo](https://img.youtube.com/vi/dfCy6QzJ-yo/0.jpg)](https://www.youtube.com/watch?v=dfCy6QzJ-yo)
+
+
+<br>
+
 ## Referências
 
 - Lei nº 10.048/2000 — Prioridade de atendimento a alguns grupos (texto consolidado): https://www.planalto.gov.br/ccivil_03/leis/LEIS_10.048.htm
